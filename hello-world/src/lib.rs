@@ -8,6 +8,7 @@ const SCREEN_WIDTH: i32 = 160; // Largura da tela
 const PLAYER_WIDTH: i32 = 9; // Largura do sprite do jogador
 const PLAYER_HEIGHT: i32 = 7;  // Altura do sprite do jogador
 
+static mut GAME_OVER: bool = false;
 const GRAVITY: f32 = 0.7; // Força da gravidade
 const JUMP_FORCE: f32 = -11.0; // Força do pulo
 const FLOOR_Y: i32 = 148; // Y do chão
@@ -78,11 +79,10 @@ impl Coletavel {
 
     fn update(&mut self) {
         unsafe {
-            if self.ativo {
-                self.x -= VELOCIDADE_ATUAL;
-                if self.x + self.width < 0 {
-                    self.x = SCREEN_WIDTH + 20; // saiu da tela
-                }
+            self.x -= VELOCIDADE_ATUAL;
+            if self.x + self.width < 0 {
+                self.x = SCREEN_WIDTH + 20;
+                self.ativo = true; // Reativa o item para aparecer novamente
             }
         }
     }
@@ -93,6 +93,22 @@ impl Coletavel {
             oval(self.x, self.y, self.width as u32, self.height as u32)
         }
     }
+}
+
+fn reiniciar_jogo() {
+    unsafe {
+        PLAYER.x = 45;
+        PLAYER.y = 140;
+        PLAYER.velocity_y = 0.0;
+        PLAYER.is_jumping = false;
+        PLAYER.score = 0;
+        PLAYER.lives = 3;
+        VELOCIDADE_ATUAL = 1;
+        FRAME_COUNT = 0;
+        GAME_OVER = false;
+    }
+
+    start(); // reinicializa itens e obstáculos
 }
 
 static mut PLAYER: Player = Player { 
@@ -131,6 +147,13 @@ pub fn start() {
     }
 }
 
+fn colisao(a_x: i32, a_y: i32, a_w: i32, a_h: i32, b_x: i32, b_y: i32, b_w: i32, b_h: i32) -> bool {
+    a_x < b_x + b_w &&
+    a_x + a_w > b_x &&
+    a_y < b_y + b_h &&
+    a_y + a_h > b_y
+}
+
 #[no_mangle]
 fn update() {
     // Paleta de cores
@@ -142,13 +165,45 @@ fn update() {
         0x6b1fb1,
     ];
     }
+
+    let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
+
+    // Verifica se o jogador perdeu todas as vidas
+    unsafe {
+        if PLAYER.lives == 0 {
+            GAME_OVER = true;
+        }
+
+        if GAME_OVER {
+            // Define plano de fundo e texto no mesmo comando
+            *DRAW_COLORS = 0x23; 
+            rect(0, 0, SCREEN_WIDTH as u32, 160); // limpa a tela com cor de fundo
+
+            text("GAME OVER", 40, 60);
+            let final_score = format!("Score: {}", PLAYER.score);
+            text(&final_score, 45, 70);
+            text("Pressione X", 45, 90);
+            text("para reiniciar", 35, 100);
+            // Verifica se o botão X foi pressionado
+            if gamepad & BUTTON_1 != 0 {
+                reiniciar_jogo();
+            }
+            return;
+        }
+    }
+
     unsafe {
     if let Some(itens) = &mut ITENS {
             for item in itens.iter_mut() {
+                if item.ativo && colisao(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, item.x, item.y, item.width, item.height){
+                item.ativo = false;
+                PLAYER.score += 1;
+                }
                 item.update();
                 item.draw();
             }
-        }
+    }
+
     *DRAW_COLORS = 3;
     let texto_pontos = format!("Pontuacao: {}", PLAYER.score);
     text(&texto_pontos, 10, 10);
@@ -161,13 +216,16 @@ fn update() {
     unsafe {
         if let Some(obstaculos) = &mut OBSTACULOS {
             for obs in obstaculos.iter_mut() {
+                if colisao(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, obs.x, obs.y, obs.width, obs.height) {
+                    PLAYER.lives = PLAYER.lives.saturating_sub(1);
+                    obs.x = SCREEN_WIDTH + 40 + (FRAME_COUNT % 100) as i32;
+                }
                 obs.update();
                 obs.draw();
             }
         }
     }
 
-    let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
     unsafe {
     // Movimento lateral
     if gamepad & BUTTON_LEFT != 0 {
