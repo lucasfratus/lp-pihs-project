@@ -3,7 +3,7 @@ mod alloc;
 mod wasm4;
 use wasm4::*;
 
-// Game State
+// Game State and Settings
 static mut GAME_OVER: bool = false;
 static mut FRAME_COUNT: u32 = 0;
 // static mut POINTS: u32 = 0; TO IMPLEMENT
@@ -11,7 +11,7 @@ static mut FRAME_COUNT: u32 = 0;
 // Scenario Settings
 const FLOOR_HEIGHT: i32 = 148;
 const GRAVITY: i32 = 1;
-static mut SCENARIO_SPEED: i32 = 1;
+static mut SCENARIO_SPEED: i32 = 2;
 
 // Player Settings
 const PLAYER_WIDTH: i32 = 8;
@@ -33,7 +33,7 @@ const BARRIER_UP_MAX_HEIGHT: i32 = 100;
 const BARRIER_DOWN_MAX_HEIGHT: i32 = 80;
 // const BARRIER_DOWN_MIN_HEIGHT: i32 = 50; TO IMPLEMENT
 
-// Player Struct
+// Player Struct and Implementations
 pub(crate) struct Player {
     x: i32,
     y: i32,
@@ -41,6 +41,65 @@ pub(crate) struct Player {
     is_jumping: bool,
     score: u8,
     lives: u8,
+}
+impl Player {
+    fn update_position(&mut self) {
+        let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
+        // Horizontal Movement
+        if gamepad & BUTTON_LEFT != 0 {
+            self.x -= 2;
+        }
+        if gamepad & BUTTON_RIGHT != 0 {
+            self.x += 2;
+        }
+
+        // Jump Movement
+        if gamepad & BUTTON_1 != 0 && !self.is_jumping {
+            self.velocity_y = PLAYER_JUMP_FORCE;
+            self.is_jumping = true;
+        }
+
+        // Apply Gravity
+        self.velocity_y += GRAVITY;
+        self.y += self.velocity_y;
+        
+        // Checks if Player has reached the floor
+        if self.y >= FLOOR_HEIGHT {
+            self.y = FLOOR_HEIGHT;
+            self.velocity_y = 0;
+            self.is_jumping = false;
+        }
+
+        // Limit the Player on the screen
+        if self.x < 0 {
+            self.x = 0;
+        }
+        if self.y < 0 {
+            self.y = 0;
+        }
+        if self.x > SCREEN_SIZE as i32 - PLAYER_WIDTH {
+            self.x = SCREEN_SIZE as i32 - PLAYER_WIDTH;
+        }
+        if self.y > FLOOR_HEIGHT - PLAYER_HEIGHT {
+            self.y = FLOOR_HEIGHT - PLAYER_HEIGHT;
+        }
+    }
+    fn draw_player(&mut self) {
+        unsafe { *DRAW_COLORS = 0x4142 } // Player Pallete
+        blit(
+            // Player sprite: Byte Array in 2BPP
+            &[0x80,0x0a,0x00,0x02,0x2f,0xfa,0x8f,0xfa,0x80,0xfe,0xbf,0xff,0x8f,0xfa,0x04,0x6a],
+            unsafe {
+                PLAYER.x
+            },
+            unsafe {
+                PLAYER.y
+            },
+            PLAYER_WIDTH as u32,
+            PLAYER_HEIGHT as u32,
+            BLIT_2BPP,
+        );
+    }
 }
 
 // Coin Struct and Implementations
@@ -105,29 +164,31 @@ static mut PLAYER: Player = Player {
     x: 45,
     y: 30,
     velocity_y: 0,
-    is_jumping: false,
+    is_jumping: true,
     score: 0,
     lives: 3
 };
 static mut COINS: Option<Vec<Coin>> = None;
 static mut BARRIERS: Option<Vec<Barrier>> = None;
 
-// Functions
+// Logic Functions
 fn restart() {
-    // Rebuild Player
-    unsafe {
-        PLAYER.x = 45;
-        PLAYER.y = 30;
-        PLAYER.velocity_y = 0;
-        PLAYER.is_jumping = false;
-        PLAYER.score = 0;
-        PLAYER.lives = 3;
-        SCENARIO_SPEED = 1;
-        FRAME_COUNT = 0;
-        GAME_OVER = false;
+    let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
+    if gamepad & BUTTON_1 != 0 {
+        // Rebuild Player
+        unsafe {
+            PLAYER.x = 45;
+            PLAYER.y = 30;
+            PLAYER.velocity_y = 0;
+            PLAYER.is_jumping = true;
+            PLAYER.score = 0;
+            PLAYER.lives = 3;
+            SCENARIO_SPEED = 1;
+            FRAME_COUNT = 0;
+            GAME_OVER = false;
+        }
+        start(); // Rebuild Coins and Barriers
     }
-
-    start(); // Rebuild Coins and Barriers
 }
 
 fn collision(a_x: i32, a_y: i32, a_w: i32, a_h: i32, b_x: i32, b_y: i32, b_w: i32, b_h: i32) -> bool {
@@ -137,9 +198,92 @@ fn collision(a_x: i32, a_y: i32, a_w: i32, a_h: i32, b_x: i32, b_y: i32, b_w: i3
     a_y + a_h > b_y
 }
 
+fn player_coin_interaction() {
+    unsafe {
+    if let Some(coins) = &mut COINS {
+            for coin in coins.iter_mut() {
+                if coin.not_collected && collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, coin.x, coin.y, COIN_WIDTH, COIN_HEIGTH){
+                    coin.not_collected = false;
+                    PLAYER.score += 1;
+                }
+                coin.update();
+                coin.draw();
+            }
+        }
+    }
+}
+
+fn player_barrier_interaction() {
+    unsafe {
+        if let Some(barriers) = &mut BARRIERS {
+            for barrier in barriers.iter_mut() {
+                if collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, barrier.x, barrier.y, BARRIER_WIDTH, barrier.height) {
+                    PLAYER.lives = PLAYER.lives.saturating_sub(1);
+                    barrier.x = SCREEN_SIZE as i32 + 40 + (FRAME_COUNT % 100) as i32;
+                }
+                barrier.update();
+                barrier.draw();
+            }
+        }
+    }
+}
+
+// Draw Functions ------------------------------------------------------------------------------------------
+fn draw_scenario_screen() {
+    // Draw Sun
+    unsafe { *DRAW_COLORS = 0x33 }
+    oval(-30,-30, 80, 80);
+
+    // Draw the floor
+    unsafe { *DRAW_COLORS = 0x4; }
+    rect(0, FLOOR_HEIGHT, 160, FLOOR_HEIGHT as u32);
+
+    // Draw Player
+    unsafe {
+        PLAYER.draw_player();
+    }
+
+    // Draw HUD
+    unsafe {
+        *DRAW_COLORS = 4;
+        let coins_qnty = PLAYER.score;
+        let coins_text = format!("Coins: {}", coins_qnty);
+        text(&coins_text, 10, 10);
+
+        let lives_qnty = PLAYER.lives;
+        let lives_text = format!("Lives: {}", lives_qnty);
+        text(&lives_text, 10, 20);
+    }
+}
+
+fn draw_gameover_screen() {
+    unsafe {
+        // Clean screen
+        *DRAW_COLORS = 1; 
+        rect(0, 0, SCREEN_SIZE, 160);
+        // Draw Game Over text
+        *DRAW_COLORS = 4;
+        text("GAME OVER", 40, 60);
+        let coins_qnty = PLAYER.score;
+        let final_score = format!("Score: {}", coins_qnty);
+        text(&final_score, 45, 70);
+        text("Press X", 30, 90);
+        text("to restart", 30, 100);
+    }
+}
 
 #[no_mangle]
 pub fn start() {
+    // Define Color Palette
+    unsafe {
+    *PALETTE = [
+        0x7e1f23,
+        0x5e4069,
+        0xc4181f,
+        0x120a19,
+    ];
+    }
+
     // Coins
     let mut coins = Vec::new();
     
@@ -161,154 +305,42 @@ pub fn start() {
     unsafe {
         BARRIERS = Some(barriers);
     }
+
+    // Reset Frame Count
+    unsafe {
+        FRAME_COUNT = 0;
+    }
 }
 
 #[no_mangle]
 fn update() {
-    // Color Pallete
-    unsafe {
-    *PALETTE = [
-        0x7e1f23,
-        0x5e4069,
-        0xc4181f,
-        0x120a19,
-    ];
-    }
-    unsafe { 
-        *DRAW_COLORS = 0x33
-    }
-    oval(-30,-30, 80, 80);
-    let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
-
-    // Checks if the player has lost all lives
+    // Checks Game State
     unsafe {
         if PLAYER.lives == 0 {
             GAME_OVER = true;
         }
-
         if GAME_OVER {
-            // Defines the game over background and text
-            *DRAW_COLORS = 1; 
-            rect(0, 0, SCREEN_SIZE, 160); // Cleans screen with background color
-
-            *DRAW_COLORS = 4;
-            text("GAME OVER", 40, 60);
-            let final_score = format!("Score: {}", PLAYER.score);
-            text(&final_score, 45, 70);
-            text("Press X", 30, 90);
-            text("to restart", 30, 100);
-            // Checks if the X button was pressed
-            if gamepad & BUTTON_1 != 0 {
-                restart();
-            }
-            return;
+            // GAME OVER STATE
+            draw_gameover_screen();
+            restart();
+        } else {
+            // SCENARIO STATE
+            PLAYER.update_position();
+            player_coin_interaction();
+            player_barrier_interaction();
+            draw_scenario_screen();
         }
     }
 
-    unsafe {
-    if let Some(coins) = &mut COINS {
-            for coin in coins.iter_mut() {
-                if coin.not_collected && collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, coin.x, coin.y, COIN_WIDTH, COIN_HEIGTH){
-                    coin.not_collected = false;
-                    PLAYER.score += 1;
-                }
-                coin.update();
-                coin.draw();
-            }
-    }
-
-    *DRAW_COLORS = 4;
-    let coins_text = format!("Coins: {}", PLAYER.score);
-    text(&coins_text, 10, 10);
-
-    let lives_text = format!("Lives: {}", PLAYER.lives);
-    text(&lives_text, 10, 20);
-    }
-
-    unsafe {
-        if let Some(barriers) = &mut BARRIERS {
-            for barrier in barriers.iter_mut() {
-                if collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, barrier.x, barrier.y, BARRIER_WIDTH, barrier.height) {
-                    PLAYER.lives = PLAYER.lives.saturating_sub(1);
-                    barrier.x = SCREEN_SIZE as i32 + 40 + (FRAME_COUNT % 100) as i32;
-                }
-                barrier.update();
-                barrier.draw();
-            }
-        }
-    }
-
-    unsafe {
-    // Horizontal Movement
-    if gamepad & BUTTON_LEFT != 0 {
-        PLAYER.x -= 2;
-    }
-    if gamepad & BUTTON_RIGHT != 0 {
-        PLAYER.x += 2;
-    }
-
-    // Jump Movement
-    if gamepad & BUTTON_1 != 0 && !PLAYER.is_jumping {
-        PLAYER.velocity_y = PLAYER_JUMP_FORCE;
-        PLAYER.is_jumping = true;
-    }
-
-    // Apply Gravity
-    PLAYER.velocity_y += GRAVITY;
-    PLAYER.y += PLAYER.velocity_y;
-
-
-    // Checks if Player has reached the floor
-    if PLAYER.y >= FLOOR_HEIGHT {
-        PLAYER.y = FLOOR_HEIGHT;
-        PLAYER.velocity_y = 0;
-        PLAYER.is_jumping = false;
-    }
-
-    // Limit the Player on the screen
-    if PLAYER.x < 0 {
-        PLAYER.x = 0;
-    }
-    if PLAYER.y < 0 {
-        PLAYER.y = 0;
-    }
-    if PLAYER.x > SCREEN_SIZE as i32 - PLAYER_WIDTH {
-        PLAYER.x = SCREEN_SIZE as i32 - PLAYER_WIDTH;
-    }
-    if PLAYER.y > FLOOR_HEIGHT - PLAYER_HEIGHT {
-        PLAYER.y = FLOOR_HEIGHT - PLAYER_HEIGHT;
-    }
-    }
-
-    // Draw the floor
-    unsafe {*DRAW_COLORS = 0x4;}
-    rect(0, FLOOR_HEIGHT, 160, FLOOR_HEIGHT as u32);
-
-
-    // Draw the Player
-    unsafe { *DRAW_COLORS = 0x4142} // Player sprite color
-    blit(
-        // Player sprite: Byte Array in 2BPP
-        &[0x80,0x0a,0x00,0x02,0x2f,0xfa,0x8f,0xfa,0x80,0xfe,0xbf,0xff,0x8f,0xfa,0x04,0x6a],
-        unsafe {
-            PLAYER.x
-        },
-        unsafe {
-            PLAYER.y
-        },
-        PLAYER_WIDTH as u32,
-        PLAYER_HEIGHT as u32,
-        BLIT_2BPP,
-    );
-
+    // Increment Frame Count
     unsafe {
         FRAME_COUNT += 1;
-
         /*
+        TO IMPLEMENT
         // Change Scenario Speed
         if FRAME_COUNT % 1000 == 0 && SCENARIO_SPEED < 2 {
             SCENARIO_SPEED += 1;
         }
         */
-    }   
+    }
 }
