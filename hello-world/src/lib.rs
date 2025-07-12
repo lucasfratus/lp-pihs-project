@@ -3,61 +3,91 @@ mod alloc;
 mod wasm4;
 use wasm4::*;
 
-const SCREEN_WIDTH: i32 = 160; // Largura da tela
-
-const PLAYER_WIDTH: i32 = 8; // Largura do Sprite do jogador
-const PLAYER_HEIGHT: i32 = 8;  // Altura do Sprite do jogador
-
+// Game State
 static mut GAME_OVER: bool = false;
-const GRAVITY: f32 = 0.7; // Força da gravidade
-const JUMP_FORCE: f32 = -11.0; // Força do pulo
-const FLOOR_Y: i32 = 148; // Altura do chão
-static mut VELOCIDADE_ATUAL: f32 = 0.5; // Velocidade do cenário
-static mut FRAME_COUNT: u32 = 0; // Contador de Frames
+static mut FRAME_COUNT: u32 = 0;
+// static mut POINTS: u32 = 0; TO IMPLEMENT
 
-// Coletáveis
-const VELOCIDADE: f32 = 1.0; // Velocidade dos Coletáveis
-const POSICOES_Y: [f32; 1] = [140.0]; // Linhas fixas
-const NUM_COLETAVEIS_POR_LINHA: usize = 5;
-const ESPACAMENTO_X: f32 = 10.0; // Distância entre os coletáveis
+// Scenario Settings
+const FLOOR_HEIGHT: i32 = 148;
+const GRAVITY: i32 = 1;
+static mut SCENARIO_SPEED: i32 = 1;
 
-// Obstaculos
-static mut OBSTACULOS: Option<Vec<Obstaculo>> = None;
+// Player Settings
+const PLAYER_WIDTH: i32 = 8;
+const PLAYER_HEIGHT: i32 = 8;
+const PLAYER_JUMP_FORCE: i32 = -14;
 
+// Coins Settings
+const COIN_Y: i32 = FLOOR_HEIGHT - 8;
+const COIN_WIDTH: i32 = 4;
+const COIN_HEIGTH: i32 = 4;
+const GAP: i32 = 10;
+const MAX_COIN_QTDY: usize = 5;
+// const MIN_COIN_QTDY: usize = 2; TO IMPLEMENT
+
+// Barrier Settings
+const BARRIER_WIDTH: i32 = 12;
+const BARRIER_UP_MAX_HEIGHT: i32 = 100;
+// const BARRIER_UP_MIN_HEIGHT: i32 = 110; TO IMPLEMENT
+const BARRIER_DOWN_MAX_HEIGHT: i32 = 80;
+// const BARRIER_DOWN_MIN_HEIGHT: i32 = 50; TO IMPLEMENT
+
+// Player Struct
 pub(crate) struct Player {
-    x: f32,
-    y: f32,
-    velocity_y: f32,
+    x: i32,
+    y: i32,
+    velocity_y: i32,
     is_jumping: bool,
     score: u8,
     lives: u8,
 }
 
-struct Coletavel {
-    x: f32,
-    y: f32,
-    width: i32,
-    height: i32,
-    ativo: bool,
+// Coin Struct and Implementations
+struct Coin {
+    x: i32,
+    y: i32,
+    not_collected: bool,
 }
-
-struct Obstaculo {
-    x: f32,
-    y: f32,
-    width: i32,
-    height: i32,
-}
-
-impl Obstaculo {
-    fn new(x: f32, y: f32) -> Self {
-        Self { x, y, width: 12, height: 60 }
+impl Coin {
+    fn new(x: i32, y: i32) -> Self {
+        Self {x, y, not_collected: true }
     }
 
     fn update(&mut self) {
         unsafe {
-            self.x -= VELOCIDADE_ATUAL;
-            if self.x + (self.width as f32) < 0.0 {
-                self.x = (SCREEN_WIDTH as f32) + 40.0;
+            self.x -= SCENARIO_SPEED;
+            if self.x + COIN_WIDTH < 0 {
+                self.x = SCREEN_SIZE as i32 + 20;
+                self.not_collected = true;
+            }
+        }
+    }
+
+    fn draw(&self) {
+        if self.not_collected {
+            unsafe {*DRAW_COLORS = 0x21 }
+            oval(self.x, self.y, COIN_WIDTH as u32, COIN_HEIGTH as u32)
+        }
+    }
+}
+
+// Barrier Struct and Implementations
+struct Barrier {
+    x: i32,
+    y: i32,
+    height: i32,
+}
+impl Barrier {
+    fn new(x: i32, y: i32, height: i32) -> Self {
+        Self {x, y, height}
+    }
+
+    fn update(&mut self) {
+        unsafe {
+            self.x -= SCENARIO_SPEED;
+            if self.x + BARRIER_WIDTH < 0 {
+                self.x = SCREEN_SIZE as i32 + 40;
             }
         }
     }
@@ -66,97 +96,76 @@ impl Obstaculo {
         unsafe {
             *DRAW_COLORS = 0x33;
         }
-        rect(self.x as i32, self.y as i32, self.width as u32, self.height as u32);
-    }
-}
-static mut PONTOS: u32 = 0;
-
-impl Coletavel {
-    fn new(x: f32, y: f32) -> Self {
-        // cria uma nova "instância" da struct Coletavel
-        Self { x, y, width: 4, height: 4, ativo: true }
-    }
-
-    fn update(&mut self) {
-        unsafe {
-            self.x -= VELOCIDADE_ATUAL;
-            if self.x + (self.width as f32) < 0.0 {
-                self.x = SCREEN_WIDTH as f32 + 20.0;
-                self.ativo = true; // Reativa o item para aparecer novamente
-            }
-        }
-    }
-
-    fn draw(&self) {
-        if self.ativo {
-            unsafe {*DRAW_COLORS = 0x21 }
-            oval(self.x as i32, self.y as i32, self.width as u32, self.height as u32)
-        }
+        rect(self.x, self.y, BARRIER_WIDTH as u32, self.height as u32);
     }
 }
 
-fn reiniciar_jogo() {
+// Build Global Structs
+static mut PLAYER: Player = Player { 
+    x: 45,
+    y: 30,
+    velocity_y: 0,
+    is_jumping: false,
+    score: 0,
+    lives: 3
+};
+static mut COINS: Option<Vec<Coin>> = None;
+static mut BARRIERS: Option<Vec<Barrier>> = None;
+
+// Functions
+fn restart() {
+    // Rebuild Player
     unsafe {
-        PLAYER.x = 45.0;
-        PLAYER.y = 140.0;
-        PLAYER.velocity_y = 0.0;
+        PLAYER.x = 45;
+        PLAYER.y = 30;
+        PLAYER.velocity_y = 0;
         PLAYER.is_jumping = false;
         PLAYER.score = 0;
         PLAYER.lives = 3;
-        VELOCIDADE_ATUAL = 0.5;
+        SCENARIO_SPEED = 1;
         FRAME_COUNT = 0;
         GAME_OVER = false;
     }
 
-    start(); // reinicializa itens e obstáculos
+    start(); // Rebuild Coins and Barriers
 }
 
-static mut PLAYER: Player = Player { 
-    x: 45.0, 
-    y: 140.0, 
-    velocity_y: 0.0, 
-    is_jumping: false, 
-    score: 0, 
-    lives: 3 
-};
+fn collision(a_x: i32, a_y: i32, a_w: i32, a_h: i32, b_x: i32, b_y: i32, b_w: i32, b_h: i32) -> bool {
+    a_x < b_x + b_w &&
+    a_x + a_w > b_x &&
+    a_y < b_y + b_h &&
+    a_y + a_h > b_y
+}
 
-static mut ITENS: Option<Vec<Coletavel>> = None;
 
 #[no_mangle]
 pub fn start() {
-    let mut itens = Vec::new();
-
-    for (linha, &y) in POSICOES_Y.iter().enumerate() {
-        for i in 0..NUM_COLETAVEIS_POR_LINHA {
-            let x = 160 + i as i32 * ESPACAMENTO_X as i32 + (linha as i32 * 10);
-            itens.push(Coletavel::new(x as f32, y));
-        }
+    // Coins
+    let mut coins = Vec::new();
+    
+    for i in 0..MAX_COIN_QTDY {
+        let x = 160 + i as i32 * GAP;
+        coins.push(Coin::new(x, COIN_Y));
     }
 
     unsafe {
-        ITENS = Some(itens);
+        COINS = Some(coins);
     }
 
-    let mut obstaculos = Vec::new();
+    // Barriers
+    let mut barriers = Vec::new();
 
-    obstaculos.push(Obstaculo::new(180.0, 110.0)); // no chão
-    obstaculos.push(Obstaculo::new(280.0, 55.0));  // no teto
+    barriers.push(Barrier::new(SCREEN_SIZE as i32 + 100, 0, BARRIER_UP_MAX_HEIGHT));  // Up Barrier
+    barriers.push(Barrier::new(SCREEN_SIZE as i32, BARRIER_DOWN_MAX_HEIGHT, FLOOR_HEIGHT - BARRIER_DOWN_MAX_HEIGHT)); // Down Barrier
 
     unsafe {
-        OBSTACULOS = Some(obstaculos);
+        BARRIERS = Some(barriers);
     }
-}
-
-fn colisao(a_x: f32, a_y: f32, a_w: i32, a_h: i32, b_x: f32, b_y: f32, b_w: i32, b_h: i32) -> bool {
-    a_x < b_x + b_w as f32 &&
-    a_x + a_w as f32 > b_x &&
-    a_y < b_y + b_h as f32 &&
-    a_y + a_h as f32 > b_y
 }
 
 #[no_mangle]
 fn update() {
-    // Paleta de cores
+    // Color Pallete
     unsafe {
     *PALETTE = [
         0x7e1f23,
@@ -171,132 +180,135 @@ fn update() {
     oval(-30,-30, 80, 80);
     let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
 
-    // Verifica se o jogador perdeu todas as vidas
+    // Checks if the player has lost all lives
     unsafe {
         if PLAYER.lives == 0 {
             GAME_OVER = true;
         }
 
         if GAME_OVER {
-            // Define plano de fundo e texto no mesmo comando
+            // Defines the game over background and text
             *DRAW_COLORS = 1; 
-            rect(0, 0, SCREEN_WIDTH as u32, 160); // limpa a tela com cor de fundo
+            rect(0, 0, SCREEN_SIZE, 160); // Cleans screen with background color
 
             *DRAW_COLORS = 4;
             text("GAME OVER", 40, 60);
             let final_score = format!("Score: {}", PLAYER.score);
             text(&final_score, 45, 70);
-            text("Pressione X", 30, 90);
-            text("para reiniciar", 30, 100);
-            // Verifica se o botão X foi pressionado
+            text("Press X", 30, 90);
+            text("to restart", 30, 100);
+            // Checks if the X button was pressed
             if gamepad & BUTTON_1 != 0 {
-                reiniciar_jogo();
+                restart();
             }
             return;
         }
     }
 
     unsafe {
-    if let Some(itens) = &mut ITENS {
-            for item in itens.iter_mut() {
-                if item.ativo && colisao(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, item.x, item.y, item.width, item.height){
-                item.ativo = false;
-                PLAYER.score += 1;
+    if let Some(coins) = &mut COINS {
+            for coin in coins.iter_mut() {
+                if coin.not_collected && collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, coin.x, coin.y, COIN_WIDTH, COIN_HEIGTH){
+                    coin.not_collected = false;
+                    PLAYER.score += 1;
                 }
-                item.update();
-                item.draw();
+                coin.update();
+                coin.draw();
             }
     }
 
     *DRAW_COLORS = 4;
-    let texto_pontos = format!("Pontuacao: {}", PLAYER.score);
-    text(&texto_pontos, 10, 10);
+    let coins_text = format!("Coins: {}", PLAYER.score);
+    text(&coins_text, 10, 10);
 
-    let texto_lives = format!("Vidas: {}", PLAYER.lives);
-    unsafe { *DRAW_COLORS = 4 }
-    text(&texto_lives, 10, 20);
+    let lives_text = format!("Lives: {}", PLAYER.lives);
+    text(&lives_text, 10, 20);
     }
 
     unsafe {
-        if let Some(obstaculos) = &mut OBSTACULOS {
-            for obs in obstaculos.iter_mut() {
-                if colisao(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, obs.x, obs.y, obs.width, obs.height) {
+        if let Some(barriers) = &mut BARRIERS {
+            for barrier in barriers.iter_mut() {
+                if collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, barrier.x, barrier.y, BARRIER_WIDTH, barrier.height) {
                     PLAYER.lives = PLAYER.lives.saturating_sub(1);
-                    obs.x = SCREEN_WIDTH as f32 + 40.0 + (FRAME_COUNT % 100) as f32;
+                    barrier.x = SCREEN_SIZE as i32 + 40 + (FRAME_COUNT % 100) as i32;
                 }
-                obs.update();
-                obs.draw();
+                barrier.update();
+                barrier.draw();
             }
         }
     }
 
     unsafe {
-    // Movimento lateral
+    // Horizontal Movement
     if gamepad & BUTTON_LEFT != 0 {
-        PLAYER.x -= 2.0
+        PLAYER.x -= 2;
     }
     if gamepad & BUTTON_RIGHT != 0 {
-        PLAYER.x += 2.0;
+        PLAYER.x += 2;
     }
 
-    // Pular
+    // Jump Movement
     if gamepad & BUTTON_1 != 0 && !PLAYER.is_jumping {
-        PLAYER.velocity_y = JUMP_FORCE;
+        PLAYER.velocity_y = PLAYER_JUMP_FORCE;
         PLAYER.is_jumping = true;
     }
 
-    // Aplicar gravidade
+    // Apply Gravity
     PLAYER.velocity_y += GRAVITY;
     PLAYER.y += PLAYER.velocity_y;
 
 
-    // Verificar se atingiu o chão
-    if PLAYER.y >= FLOOR_Y as f32 {
-        PLAYER.y = FLOOR_Y as f32;
-        PLAYER.velocity_y = 0.0;
+    // Checks if Player has reached the floor
+    if PLAYER.y >= FLOOR_HEIGHT {
+        PLAYER.y = FLOOR_HEIGHT;
+        PLAYER.velocity_y = 0;
         PLAYER.is_jumping = false;
     }
 
-    // Limitar o jogador dentro da tela
-    if PLAYER.x < 0.0 {
-        PLAYER.x = 0.0;
+    // Limit the Player on the screen
+    if PLAYER.x < 0 {
+        PLAYER.x = 0;
     }
-    if PLAYER.y < 0.0 {
-        PLAYER.y = 0.0;
+    if PLAYER.y < 0 {
+        PLAYER.y = 0;
     }
-    if PLAYER.x > (SCREEN_WIDTH - PLAYER_WIDTH) as f32 {
-        PLAYER.x = (SCREEN_WIDTH - PLAYER_WIDTH) as f32;
+    if PLAYER.x > SCREEN_SIZE as i32 - PLAYER_WIDTH {
+        PLAYER.x = SCREEN_SIZE as i32 - PLAYER_WIDTH;
     }
-    if PLAYER.y > (FLOOR_Y - PLAYER_HEIGHT) as f32 {
-        PLAYER.y = (FLOOR_Y - PLAYER_HEIGHT) as f32;
+    if PLAYER.y > FLOOR_HEIGHT - PLAYER_HEIGHT {
+        PLAYER.y = FLOOR_HEIGHT - PLAYER_HEIGHT;
     }
     }
-    // Desenhar o chão
+
+    // Draw the floor
     unsafe {*DRAW_COLORS = 0x4;}
-    rect(0, 149, 160, 149);
+    rect(0, FLOOR_HEIGHT, 160, FLOOR_HEIGHT as u32);
 
 
-    // Fazer o desenho do jogador
-    unsafe { *DRAW_COLORS = 0x4142} // Cor do sprite do jogador
+    // Draw the Player
+    unsafe { *DRAW_COLORS = 0x4142} // Player sprite color
     blit(
-        // O sprite é um array de bytes representando o sprite em 2bpp
+        // Player sprite: Byte Array in 2BPP
         &[0x80,0x0a,0x00,0x02,0x2f,0xfa,0x8f,0xfa,0x80,0xfe,0xbf,0xff,0x8f,0xfa,0x04,0x6a],
-        unsafe { 
-            PLAYER.x as i32
+        unsafe {
+            PLAYER.x
         },
         unsafe {
-            PLAYER.y as i32
+            PLAYER.y
         },
-        8,                  // largura
-        8,                  // altura
+        PLAYER_WIDTH as u32,
+        PLAYER_HEIGHT as u32,
         BLIT_2BPP,
     );
+
     unsafe {
         FRAME_COUNT += 1;
 
-        // A cada 1000 frames, aumenta a velocidade
-        if FRAME_COUNT % 500 == 0 && VELOCIDADE_ATUAL < 3.0 {
-            VELOCIDADE_ATUAL += 0.2;
+        /*
+        // Change Scenario Speed
+        if FRAME_COUNT % 1000 == 0 && SCENARIO_SPEED < 2 {
+            SCENARIO_SPEED += 1;
         }
+        */
     }   
 }
