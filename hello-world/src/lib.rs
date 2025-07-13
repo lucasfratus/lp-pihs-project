@@ -4,6 +4,7 @@ mod wasm4;
 use wasm4::*;
 
 // Game State and Settings
+static mut GAME_START: bool = true;
 static mut GAME_OVER: bool = false;
 static mut FRAME_COUNT: u32 = 0;
 // static mut POINTS: u32 = 0; TO IMPLEMENT
@@ -84,17 +85,21 @@ impl Player {
             self.y = FLOOR_HEIGHT - PLAYER_HEIGHT;
         }
     }
+    fn check_death(&mut self) {
+        // Check if Player is dead
+        if self.lives == 0 {
+            unsafe {
+                GAME_OVER = true;
+            }
+        }
+    }
     fn draw_player(&mut self) {
         unsafe { *DRAW_COLORS = 0x4142 } // Player Pallete
         blit(
             // Player sprite: Byte Array in 2BPP
             &[0x80,0x0a,0x00,0x02,0x2f,0xfa,0x8f,0xfa,0x80,0xfe,0xbf,0xff,0x8f,0xfa,0x04,0x6a],
-            unsafe {
-                PLAYER.x
-            },
-            unsafe {
-                PLAYER.y
-            },
+            self.x,
+            self.y,
             PLAYER_WIDTH as u32,
             PLAYER_HEIGHT as u32,
             BLIT_2BPP,
@@ -186,6 +191,7 @@ fn restart() {
             SCENARIO_SPEED = 1;
             FRAME_COUNT = 0;
             GAME_OVER = false;
+            GAME_START = false;
         }
         start(); // Rebuild Coins and Barriers
     }
@@ -272,6 +278,20 @@ fn draw_gameover_screen() {
     }
 }
 
+fn draw_start_screen() {
+    unsafe {
+        // START STATE
+        // Clean screen
+        *DRAW_COLORS = 1; 
+        rect(0, 0, SCREEN_SIZE, 160);
+        // Draw Game Start text
+        *DRAW_COLORS = 4;
+        text("TITULO DO JOGO", 40, 60);
+        text("Press X", 30, 90);
+        text("to start", 30, 100);
+    }
+}
+
 #[no_mangle]
 pub fn start() {
     // Define Color Palette
@@ -316,18 +336,20 @@ pub fn start() {
 fn update() {
     // Checks Game State
     unsafe {
-        if PLAYER.lives == 0 {
-            GAME_OVER = true;
-        }
-        if GAME_OVER {
-            // GAME OVER STATE
-            draw_gameover_screen();
+        if GAME_START {
+            // START STATE
             restart();
+            draw_start_screen();
+        } else if GAME_OVER {
+            // GAME OVER STATE
+            restart();
+            draw_gameover_screen();
         } else {
             // SCENARIO STATE
             PLAYER.update_position();
             player_coin_interaction();
             player_barrier_interaction();
+            PLAYER.check_death();
             draw_scenario_screen();
         }
     }
