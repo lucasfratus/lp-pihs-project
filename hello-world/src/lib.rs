@@ -7,6 +7,7 @@ use wasm4::*;
 static mut GAME_START: bool = true;
 static mut GAME_OVER: bool = false;
 static mut FRAME_COUNT: u32 = 0;
+static mut RNG_SEED: u32 = 123456789;
 // static mut POINTS: u32 = 0; TO IMPLEMENT
 
 // Scenario Settings
@@ -28,11 +29,10 @@ const MAX_COIN_QTDY: usize = 5;
 // const MIN_COIN_QTDY: usize = 2; TO IMPLEMENT
 
 // Barrier Settings
+const BARRIER_GAP: i32 = 50;
 const BARRIER_WIDTH: i32 = 12;
-const BARRIER_UP_MAX_HEIGHT: i32 = 100;
-// const BARRIER_UP_MIN_HEIGHT: i32 = 110; TO IMPLEMENT
-const BARRIER_DOWN_MAX_HEIGHT: i32 = 80;
-// const BARRIER_DOWN_MIN_HEIGHT: i32 = 50; TO IMPLEMENT
+const BARRIER_UP_HEIGHT: i32 = 90;
+const BARRIER_DOWN_HEIGHT: i32 = 80;
 
 // Player Struct and Implementations
 pub(crate) struct Player {
@@ -45,7 +45,7 @@ pub(crate) struct Player {
 }
 impl Player {
     fn update_position(&mut self) {
-        let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
+        let gamepad = unsafe { *wasm4::GAMEPAD1 };
         // Horizontal Movement
         if gamepad & BUTTON_LEFT != 0 {
             self.x -= 2;
@@ -137,30 +137,55 @@ impl Coin {
 }
 
 // Barrier Struct and Implementations
+#[derive(Copy, Clone)]
+pub enum BarrierDisplacement {
+    Left, Middle, Right
+}
+impl BarrierDisplacement {
+    fn adjust_displacement(self) -> i32 {
+        match self {
+            BarrierDisplacement::Left => -10,
+            BarrierDisplacement::Middle => 0,
+            BarrierDisplacement::Right => 10,
+        }
+    }
+    fn random() -> Self {
+        use BarrierDisplacement::*;
+        match random_range(0, 2) {
+            0 => Left,
+            1 => Middle,
+            _ => Right,
+        }
+    }
+}
 struct Barrier {
     x: i32,
     y: i32,
     height: i32,
+    active: bool,
+    displacement: BarrierDisplacement,
 }
 impl Barrier {
-    fn new(x: i32, y: i32, height: i32) -> Self {
-        Self {x, y, height}
+    fn new(x: i32, y: i32, height: i32, active: bool, displacement: BarrierDisplacement) -> Self {
+        Self {x, y, height, active, displacement}
     }
 
     fn update(&mut self) {
         unsafe {
             self.x -= SCENARIO_SPEED;
             if self.x + BARRIER_WIDTH < 0 {
-                self.x = SCREEN_SIZE as i32 + 40;
+                self.active = false;
             }
         }
     }
 
     fn draw(&self){
-        unsafe {
-            *DRAW_COLORS = 0x33;
+        if self.active {
+            unsafe {
+                *DRAW_COLORS = 0x33;
+            }
+            rect(self.x, self.y, BARRIER_WIDTH as u32, self.height as u32);
         }
-        rect(self.x, self.y, BARRIER_WIDTH as u32, self.height as u32);
     }
 }
 
@@ -177,6 +202,26 @@ static mut COINS: Option<Vec<Coin>> = None;
 static mut BARRIERS: Option<Vec<Barrier>> = None;
 
 // Logic Functions
+fn random_u32() -> u32 {
+    unsafe {
+        // constantes clássicas para LCG
+        RNG_SEED = RNG_SEED.wrapping_mul(1664525).wrapping_add(1013904223);
+        RNG_SEED
+    }
+}
+
+fn random_range(min: i32, max: i32) -> i32 {
+    let r = random_u32();
+    min + (r % ((max - min + 1) as u32)) as i32
+}
+
+fn collision(a_x: i32, a_y: i32, a_w: i32, a_h: i32, b_x: i32, b_y: i32, b_w: i32, b_h: i32) -> bool {
+    a_x < b_x + b_w &&
+    a_x + a_w > b_x &&
+    a_y < b_y + b_h &&
+    a_y + a_h > b_y
+}
+
 fn restart() {
     let gamepad = unsafe { *wasm4 ::GAMEPAD1 };
     if gamepad & BUTTON_1 != 0 {
@@ -197,13 +242,6 @@ fn restart() {
     }
 }
 
-fn collision(a_x: i32, a_y: i32, a_w: i32, a_h: i32, b_x: i32, b_y: i32, b_w: i32, b_h: i32) -> bool {
-    a_x < b_x + b_w &&
-    a_x + a_w > b_x &&
-    a_y < b_y + b_h &&
-    a_y + a_h > b_y
-}
-
 fn player_coin_interaction() {
     unsafe {
     if let Some(coins) = &mut COINS {
@@ -212,8 +250,6 @@ fn player_coin_interaction() {
                     coin.not_collected = false;
                     PLAYER.score += 1;
                 }
-                coin.update();
-                coin.draw();
             }
         }
     }
@@ -223,12 +259,44 @@ fn player_barrier_interaction() {
     unsafe {
         if let Some(barriers) = &mut BARRIERS {
             for barrier in barriers.iter_mut() {
-                if collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, barrier.x, barrier.y, BARRIER_WIDTH, barrier.height) {
+                if barrier.active && collision(PLAYER.x, PLAYER.y, PLAYER_WIDTH, PLAYER_HEIGHT, barrier.x, barrier.y, BARRIER_WIDTH, barrier.height) {
                     PLAYER.lives = PLAYER.lives.saturating_sub(1);
-                    barrier.x = SCREEN_SIZE as i32 + 40 + (FRAME_COUNT % 100) as i32;
+                    barrier.active = false;
                 }
+            }
+        }
+    }
+}
+
+fn update_barriers() {
+    unsafe {
+        if let Some(barriers) = &mut BARRIERS {
+            if barriers[0].x + BARRIER_WIDTH < 0 {
+                barriers[0].displacement = BarrierDisplacement::random();
+                barriers[0].x = SCREEN_SIZE as i32 + 20 + barriers[0].displacement.adjust_displacement();
+                barriers[0].active = true;
+                barriers[0].y = BARRIER_DOWN_HEIGHT + barriers[0].displacement.adjust_displacement();
+                barriers[0].height = FLOOR_HEIGHT - barriers[0].y;
+            }
+            if barriers[1].x + BARRIER_WIDTH < 0 {
+                barriers[1].displacement = BarrierDisplacement::random();
+                barriers[1].x = barriers[0].x + BARRIER_GAP + barriers[1].displacement.adjust_displacement();
+                barriers[1].active = true;
+                barriers[1].height = BARRIER_UP_HEIGHT + barriers[1].displacement.adjust_displacement();
+            }
+
+            for barrier in barriers.iter_mut() {
                 barrier.update();
-                barrier.draw();
+            }
+        }
+    }
+}
+
+fn update_coins() {
+    unsafe {
+    if let Some(coins) = &mut COINS {
+            for coin in coins.iter_mut() {
+                coin.update();
             }
         }
     }
@@ -243,6 +311,24 @@ fn draw_scenario_screen() {
     // Draw the floor
     unsafe { *DRAW_COLORS = 0x4; }
     rect(0, FLOOR_HEIGHT, 160, FLOOR_HEIGHT as u32);
+
+    // Draw Barriers
+    unsafe {
+        if let Some(barriers) = &mut BARRIERS {
+            for barrier in barriers.iter_mut() {
+                barrier.draw();
+            }
+        }
+    }
+
+    // Draw Coins
+    unsafe {
+    if let Some(coins) = &mut COINS {
+            for coin in coins.iter_mut() {
+                coin.draw();
+            }
+        }
+    }
 
     // Draw Player
     unsafe {
@@ -319,8 +405,8 @@ pub fn start() {
     // Barriers
     let mut barriers = Vec::new();
 
-    barriers.push(Barrier::new(SCREEN_SIZE as i32 + 100, 0, BARRIER_UP_MAX_HEIGHT));  // Up Barrier
-    barriers.push(Barrier::new(SCREEN_SIZE as i32, BARRIER_DOWN_MAX_HEIGHT, FLOOR_HEIGHT - BARRIER_DOWN_MAX_HEIGHT)); // Down Barrier
+    barriers.push(Barrier::new(SCREEN_SIZE as i32 + BARRIER_WIDTH, BARRIER_DOWN_HEIGHT, FLOOR_HEIGHT - BARRIER_DOWN_HEIGHT, true, BarrierDisplacement::Middle)); // Down Barrier
+    barriers.push(Barrier::new(SCREEN_SIZE as i32 + BARRIER_WIDTH + BARRIER_GAP, 0, BARRIER_UP_HEIGHT, true, BarrierDisplacement::Middle));  // Up Barrier
 
     unsafe {
         BARRIERS = Some(barriers);
@@ -350,6 +436,8 @@ fn update() {
             player_coin_interaction();
             player_barrier_interaction();
             PLAYER.check_death();
+            update_barriers();
+            update_coins();
             draw_scenario_screen();
         }
     }
