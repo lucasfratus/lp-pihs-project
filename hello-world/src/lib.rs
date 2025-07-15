@@ -21,9 +21,11 @@ const PLAYER_HEIGHT: i32 = 8;
 const PLAYER_JUMP_FORCE: i32 = -14;
 
 // Coins Settings
+static mut COIN_VELOCITY: i32 = 2;
 const COIN_WIDTH: i32 = 10;
 const COIN_HEIGTH: i32 = 10;
-const COIN_VELOCITY: i32 = 3;
+const COIN_MAX_Y: i32 = 60;
+const COIN_MIN_Y: i32 = 135;
 
 // Barrier Settings
 const BARRIER_GAP: i32 = 50;
@@ -146,7 +148,7 @@ pub fn start() {
 
     // Coin
     COIN.x = SCREEN_SIZE as i32 + 20;
-    COIN.y = 100;
+    COIN.y = random_range(COIN_MAX_Y, COIN_MIN_Y);
     COIN.not_collected = true;
 
     // Barriers
@@ -247,6 +249,7 @@ fn update_coin() {
         if COIN.x + COIN_WIDTH < 0 {
             COIN.x = SCREEN_SIZE as i32 + 20;
             COIN.not_collected = true;
+            COIN.y = random_range(COIN_MAX_Y, COIN_MIN_Y);
         }
     }
 }
