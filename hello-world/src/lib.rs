@@ -114,7 +114,7 @@ static mut BALL: Ball = Ball {
 fn check_game_start() {
     unsafe {
         let gamepad = *wasm4::GAMEPAD1;
-        if gamepad & BUTTON_1 != 0 {
+        if gamepad & BUTTON_2 != 0 {
             GAME_MENU = false;
             start();
         }
@@ -518,19 +518,11 @@ fn draw_game_over_screen() {
             SCREEN_SIZE,
             SCREEN_SIZE,
             BLIT_2BPP,
-        )
+        );
 
-        // Draw Text
-        // To Do
-        /*
         *DRAW_COLORS = 4;
-        text("GAME OVER", 40, 60);
-        let coins_qnty = PLAYER.score;
-        let final_score = format!("Score: {}", coins_qnty);
-        text(&final_score, 45, 70);
-        text("Press X", 30, 90);
-        text("to restart", 30, 100);
-        */
+        text("Press Z", 10, 90);
+        text("to restart", 10, 110);
     }
 }
 
@@ -545,10 +537,12 @@ fn draw_menu_screen() {
             SCREEN_SIZE,
             SCREEN_SIZE,
             BLIT_2BPP,
-        )
+        );
 
         // Draw Text
-        // To Do
+        *DRAW_COLORS = 4;
+        text("Press Z", 80, 110);
+        text("to start!", 80, 130);
     }
 }
 
