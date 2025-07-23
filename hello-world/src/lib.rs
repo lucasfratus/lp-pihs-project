@@ -20,6 +20,9 @@ static mut GROUND_X: i32 = 0;
 // Player Settings
 const PLAYER_SIZE: i32 = 8;
 const PLAYER_JUMP_FORCE: i32 = -14;
+static mut PLAYER_DAMAGE_TIMER: u32 = 0;
+static mut PLAYER_BLINK_STATE: bool = false; 
+static mut PLAYER_BLINK_DURATION: u32 = 30;
 
 // Coins Settings
 const COIN_SIZE: i32 = 10;
@@ -250,6 +253,26 @@ fn update_player() {
     check_player_death();
 }
 
+fn update_player_blink() {
+    unsafe {
+        if PLAYER_BLINK_STATE {
+            // Incrementa o temporizador de piscar
+            PLAYER_DAMAGE_TIMER += 1;
+            
+            // Alterna entre mostrar e esconder o jogador a cada 20 frames (ajuste conforme necessário)
+            if PLAYER_DAMAGE_TIMER % 30 == 0 {
+                PLAYER_BLINK_STATE = !PLAYER_BLINK_STATE; // Alterna a visibilidade
+            }
+            if PLAYER_BLINK_DURATION > 0 {
+                PLAYER_BLINK_DURATION -= 1;
+            } else {
+                // Após a duração, o piscar é desativado
+                PLAYER_BLINK_STATE = false;
+            }
+        }
+    }
+}
+
 fn update_coin() {
     unsafe {
         COIN.x -= COIN_SPEED;
@@ -327,10 +350,16 @@ fn player_barrier_interaction() {
         if BARRIERS[0].active && collision(PLAYER.x, PLAYER.y, PLAYER_SIZE, PLAYER_SIZE, BARRIERS[0].x, BARRIERS[0].y, BARRIER_WIDTH, BARRIERS[0].height) {
             PLAYER.lives = PLAYER.lives.saturating_sub(1);
             BARRIERS[0].active = false;
+            PLAYER_DAMAGE_TIMER = 0;
+            PLAYER_BLINK_STATE = true;
+            PLAYER_BLINK_DURATION = 100;
         }
         if BARRIERS[1].active && collision(PLAYER.x, PLAYER.y, PLAYER_SIZE, PLAYER_SIZE, BARRIERS[1].x, BARRIERS[1].y, BARRIER_WIDTH, BARRIERS[1].height) {
             PLAYER.lives = PLAYER.lives.saturating_sub(1);
             BARRIERS[1].active = false;
+            PLAYER_DAMAGE_TIMER = 0;
+            PLAYER_BLINK_STATE = true;
+            PLAYER_BLINK_DURATION = 30;
         }
     }
 }
@@ -340,6 +369,9 @@ fn player_ball_interaction() {
         if BALL.active && collision(PLAYER.x, PLAYER.y, PLAYER_SIZE, PLAYER_SIZE, BALL.x, BALL.y, BALL_SIZE, BALL_SIZE) {
             PLAYER.lives = PLAYER.lives.saturating_sub(1);
             BALL.active = false;
+            PLAYER_DAMAGE_TIMER = 0;
+            PLAYER_BLINK_STATE = true;
+            PLAYER_BLINK_DURATION = 30;
         }
     }
 }
@@ -350,6 +382,7 @@ fn game_active_update() {
     update_barriers();
     update_ball();
     update_ground_x();
+    update_player_blink();
     player_coin_interaction();
     player_barrier_interaction();
     player_ball_interaction();
@@ -445,6 +478,10 @@ fn draw_coin() {
 
 fn draw_player() {
     unsafe {
+        if PLAYER_BLINK_STATE {
+            // Não desenha o jogador (fazendo ele "desaparecer")
+            return;
+        }
         *DRAW_COLORS = 0x0123;
         blit(
             &[ 0xd5,0x5f,0x55,0x57,0x78,0x8f,0xda,0xac,0xd5,0xa2,0xd6,0xa8,0xda,0xa4,0x59,0x9f ],
@@ -669,6 +706,7 @@ fn update() {
         } else if GAME_OVER {
             // GAME OVER STATE
             check_game_start();
+            PLAYER_BLINK_STATE = false;
             draw_game_over_screen();
         } else {
             // GAME ACTIVE STATE
