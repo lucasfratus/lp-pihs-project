@@ -1,1 +1,0 @@
-/home/lucas/lp-pihs-project/hello-world/target/wasm32-unknown-unknown/release/cart.wasm: /home/lucas/lp-pihs-project/hello-world/src/alloc.rs /home/lucas/lp-pihs-project/hello-world/src/lib.rs /home/lucas/lp-pihs-project/hello-world/src/wasm4.rs
