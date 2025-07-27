@@ -1,5 +1,6 @@
 # The WASM4 Exam
 
+
 A game written in Rust for the [WASM-4](https://wasm4.org) fantasy console.
 
 ## Building
