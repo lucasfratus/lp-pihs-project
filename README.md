@@ -6,7 +6,9 @@ date: 2025-07-26
 # THE WASM4 EXAM
 
 THE WASM4 EXAM is an endless runner game inspired by the Google Chrome dinosaur game. It was developed as the final project for the Programming Languages and Hardware-Software Interface Programming courses.
-The player must dodge obstacles like logs and meteors while collecting as many coins as possible. The character can jump and move sideways to survive. The goal is to last as long as possible and beat your high score.
+
+The player must dodge obstacles like logs and meteors while collecting as many coins as possible. The character can jump and move sideways to survive. The goal is to collect as many coins as possible while surviving and beat your high-score!
+
 A game written in Rust for the WASM-4 fantasy console.
 
 ## Controls
